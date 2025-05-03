@@ -61,7 +61,7 @@ class Organisms:
         env_length = self._env.get_length()
         env_terrain = self._env.get_terrain()
         # TODO: Change if environment can be NxM too
-        grid_size = env_width
+        # grid_size = env_width
 
         # Use gene pool to randomize starting organisms if requested
         if randomize:

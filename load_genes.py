@@ -3,7 +3,8 @@ from typing import Dict, List, Any
 from genome import EnergyGene, MoveGene, Gene
 
 
-def load_genes_from_file(filename: str = "gene_settings.json") -> Dict[str, Gene]:
+def load_genes_from_file(
+        filename: str = "gene_settings.json") -> Dict[str, Gene]:
     """
     Loads gene settings from a JSON file (as shown below) and returns
     a dict mapping each gene name to the appropriate Gene object:
@@ -51,7 +52,9 @@ def load_genes_from_file(filename: str = "gene_settings.json") -> Dict[str, Gene
             try:
                 min_val, max_val = settings  # type: ignore
             except (TypeError, ValueError):
-                raise ValueError(f"Expected two floats for '{gene_name}', got {settings!r}")
+                raise ValueError(
+                    f"Expected two floats for '{gene_name}', got {settings!r}"
+                    )
             default_val: float = (min_val + max_val) / 2.0
             # Gene(name, default, min, max)
             gene_pool[gene_name] = Gene(
