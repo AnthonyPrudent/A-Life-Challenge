@@ -94,25 +94,40 @@ class Organisms:
                                        "terrestrial", dtype=np.str_)
             energies = np.full((number_of_organisms,), 0.5, dtype=np.float32)
 
-        # Randomize starting positions
-        positions = np.random.randint(0, grid_size,
-                                      size=(number_of_organisms, 2)
-                                      ).astype(np.float32)
+        # Inline spawn logic
+        valid_positions = np.empty((0, 2), dtype=np.float32)
+        valid_count = 0
 
-        # Clip positions that are out of bound
-        positions = positions[
-            (positions[:, 0] >= 0) & (positions[:, 0] < env_width) &
-            (positions[:, 1] >= 0) & (positions[:, 1] < env_length)
-        ]
+        while valid_count < number_of_organisms:
+            needed = number_of_organisms - valid_count
 
-        # TODO: Ensure that the number requested is spawned rather than
-        #       just valid positions
-        # Take rows and columns of the positions and verify those on land
-        ix = positions[:, 0].astype(np.int32)
-        iy = positions[:, 1].astype(np.int32)
-        land_filter = env_terrain[iy, ix] >= 0
-        positions = positions[land_filter]
-        valid_count = positions.shape[0]
+            # draw just as many candidates as we still need
+            candidates = np.random.randint(
+                low=0,
+                high=[env_width, env_length],
+                size=(needed, 2)
+            ).astype(np.float32)
+
+            # keep only those on land
+            ix = candidates[:, 0].astype(int)
+            iy = candidates[:, 1].astype(int)
+            land_mask = env_terrain[iy, ix] >= 0
+            valid_batch = candidates[land_mask]
+
+            if valid_batch.size == 0:
+                continue  # no valid spawns this round
+
+            # accept only as many as we still need
+            take = min(valid_batch.shape[0], needed)
+            to_add = valid_batch[:take]
+
+            # accumulate in the numpy array
+            valid_positions = np.vstack((valid_positions, to_add))
+            valid_count += take
+
+        # stack into final array of shape (number_of_organisms, 2)
+        positions = np.vstack(valid_positions)
+        assert positions.shape[0] == number_of_organisms
 
         # Cut stat arrays to match valid count of organism spawn positions
         species = species[:valid_count]
