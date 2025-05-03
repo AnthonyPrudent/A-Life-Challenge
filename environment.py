@@ -97,7 +97,7 @@ class Environment:
         organisms = self._organisms.get_organisms()
 
         # Only steps while organisms present TODO: May change as env developes
-        if organisms.size != 0:
+        if organisms.shape[0] != 0:
 
             # Organisms take an action
             # TODO: Implement action decision making,
