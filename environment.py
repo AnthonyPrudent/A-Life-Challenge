@@ -85,9 +85,9 @@ class Environment:
         ix = new_positions[:, 0].astype(np.int32)
         iy = new_positions[:, 1].astype(np.int32)
 
-        terrain_mask = self._terrain[iy, ix] >= 0
+        land_mask = self._terrain[iy, ix] >= 0
 
-        return terrain_mask
+        return land_mask
 
     def step(self):
         """
