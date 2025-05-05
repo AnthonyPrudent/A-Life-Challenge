@@ -30,10 +30,12 @@ def main():
     # in grid_viewer, here for now to make easier to see what is running
     running = True
     while running:
-        running = viewer.handle_events()          # Checks for events
-        if viewer.is_running():                   # (quit, mouseclick, etc)
-            env.step()                            # Progresses simulation 1 gen
-            viewer.draw_screen()                  # Renders environment
+       # Renders environment
+        running = viewer.handle_events()            # checks for events (quit, mouseclick, etc)
+        if viewer.is_running():
+            # Need to call step on env attached to the viewer if loading a saved state
+            viewer.get_env().step()                       # Progresses simulation 1 gen
+            viewer.draw_screen()                    # Renders environment
 
 
 if __name__ == "__main__":
