@@ -209,7 +209,7 @@ class Organisms:
                 self._organisms['y_pos']
             ),
             axis=1
-            ) + move_jitter
+        ) + move_jitter
 
         self.verify_positions(new_positions)
 
@@ -218,7 +218,7 @@ class Organisms:
         alive_idx = np.flatnonzero(self._organisms['energy'])
         displacement = np.abs(
             move_jitter[:alive_idx.shape[0]]
-            ).sum(axis=1)
+        ).sum(axis=1)
         self._organisms['energy'][alive_idx] -= 0.05 * displacement
 
     # TODO: Cleanup further and add logic for move affordances
@@ -250,7 +250,7 @@ class Organisms:
     # TODO: Add method for organizim decision making
     def take_action(self):
         pass
-    
+
     def get_food(self):
         return self._food
 
@@ -261,7 +261,7 @@ class Organisms:
 
         #  Retrieves which organisms are dead and updates death counter
         dead_mask = (self._organisms['energy'] <= 0)
-        n_dead   = np.count_nonzero(dead_mask)
+        n_dead = np.count_nonzero(dead_mask)
 
         #  Update the environment's death tally.
         self._env.add_deaths(n_dead)
@@ -276,10 +276,10 @@ class Organisms:
 
             #  Use each organism’s size as its food energy.
             #  Fallback to 0.0 if no org_ref is present.
-            new_food['energy']   = dead_orgs['energy_capacity']
+            new_food['energy'] = dead_orgs['energy_capacity']
             new_food['consumed'] = False
-            new_food['x_pos']    = dead_orgs['x_pos']
-            new_food['y_pos']    = dead_orgs['y_pos']
+            new_food['x_pos'] = dead_orgs['x_pos']
+            new_food['y_pos'] = dead_orgs['y_pos']
 
             # Append into your food array
             self._food = np.concatenate((self._food, new_food))
