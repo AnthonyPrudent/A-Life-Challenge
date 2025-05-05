@@ -1,41 +1,67 @@
 import json
-import genome
+from typing import Dict, List, Any
+from genome import EnergyGene, MoveGene, Gene
 
 
-def load_genes_from_file(filename="gene_settings.json") -> dict:
+def load_genes_from_file(
+        filename: str = "gene_settings.json") -> Dict[str, Gene]:
     """
-    Loads gene settings from a json file,
-    returning a dictionary of gene objects
+    Loads gene settings from a JSON file (as shown below) and returns
+    a dict mapping each gene name to the appropriate Gene object:
 
-    :param filename: A string
+    {
+        "size": [1.0, 4.0],
+        "speed": [1.0, 5.0],
+        ...
+        "energy_prod": {
+            "options": ["heterotroph", "autotroph", "parasite"],
+            "values":  [0.1,         0.5,         1.0       ]
+        },
+        "move_aff": ["aquatic", "volant", "terrestrial"]
+    }
     """
+    gene_pool: Dict[str, Gene] = {}
 
-    genes_file = open(filename)
-    genes_data = json.load(genes_file)
-    gene_pool = {}
+    # Open and parse the JSON - Context handler will close file
+    with open(filename, "r") as f:
+        genes_data: Dict[str, Any] = json.load(f)
 
-    for gene in genes_data:
+    for gene_name, settings in genes_data.items():
+        if gene_name == "energy_prod":
+            options: List[str] = settings["options"]
+            values: List[float] = settings["values"]
+            # EnergyGene(default_option, mid, min, max, all_options)
+            gene_pool[gene_name] = EnergyGene(
+                options[0],
+                values[1],
+                values[0],
+                values[2],
+                options
+            )
 
-        if gene == "energy_prod":
-            options = genes_data[gene]["options"]
-            values = genes_data[gene]["values"]
-            energy_gene = genome.EnergyGene(options[0],
-                                            values[1],
-                                            values[0],
-                                            values[2],
-                                            options)
-            gene_pool[gene] = energy_gene
-
-        elif gene == "move_aff":
-            options = genes_data[gene]
-            gene_pool[gene] = genome.MoveGene(options[0], options)
+        elif gene_name == "move_aff":
+            options: List[str] = settings  # just a list of affinities
+            # MoveGene(default_affinity, all_affinities)
+            gene_pool[gene_name] = MoveGene(
+                options[0],
+                options
+            )
 
         else:
-            gene_sett = genes_data[gene]
-            gene_pool[gene] = genome.Gene(type,
-                                          gene_sett[1],
-                                          gene_sett[0],
-                                          gene_sett[2])
+            # Generic genes are two-element [min, max] lists
+            try:
+                min_val, max_val = settings  # type: ignore
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"Expected two floats for '{gene_name}', got {settings!r}"
+                    )
+            default_val: float = (min_val + max_val) / 2.0
+            # Gene(name, default, min, max)
+            gene_pool[gene_name] = Gene(
+                gene_name,
+                default_val,
+                min_val,
+                max_val
+            )
 
-    genes_file.close()
     return gene_pool

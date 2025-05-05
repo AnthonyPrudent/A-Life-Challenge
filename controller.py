@@ -1,6 +1,7 @@
 from environment import Environment
 from environment import generate_fractal_terrain
 from viewer2dp import Viewer2D
+from load_genes import load_genes_from_file
 
 # Variables for setup/testing
 GRID_SIZE = 1000         # Determines size of environment
@@ -18,6 +19,8 @@ def main():
     # Spawn initial organisms
     # TODO: Implement choice to randomize initial organisms
     # TODO: gene_pool = load_genes.load_genes_from_file()
+    gene_pool = load_genes_from_file("gene_settings.json")
+    print(gene_pool)
     number_of_organisms = int(NUM_ORGANISMS)
     env.get_organisms().spawn_initial_organisms(number_of_organisms)
 

@@ -1,5 +1,5 @@
 {
-    "size": [1.0, 4.0], 
+    "size": [1.0, 4.0],
     "speed": [1.0, 5.0],
     "max_age": [5.0, 100.0],
     "energy_capacity": [1.0, 4.0],
@@ -8,12 +8,16 @@
     "min_temp_tol": [1.0, 3.0],
     "max_temp_tol": [1.0, 3.0],
     "energy_prod": {
-        "options":["heterotroph", "autotroph", "parasite"],
-        "values": [0.1, 0.5, 1.0]
+      "options": ["heterotroph", "autotroph", "parasite"],
+      "values":  [0.1,        0.5,        1.0      ]
     },
-    "move_aff": [
-        "aquatic",
-        "volant",
-        "terrestrial"
-    ]
-}
+    "move_aff": ["aquatic", "volant", "terrestrial"],
+  
+    "land_movement_limbs":    [0.0, 1.0],
+    "water_movement_fins":    [0.0, 1.0],
+    "attack_sharp_teeth":     [0.0, 1.0],
+    "sight_eyes":             [1.0, 10.0],
+    "defense_scales":         [0.0, 1.0],
+    "parasitic":              [0.0, 1.0],
+    "fur":                    [0.0, 1.0]
+  }

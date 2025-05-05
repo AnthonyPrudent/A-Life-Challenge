@@ -77,7 +77,7 @@ class Viewer2D:
         self._skip_button.draw_button()
 
         pygame.display.flip()
-        self.clock.tick(5)
+        self.clock.tick(20)
         self.timestep += 1
 
     def draw_terrain(self):
@@ -121,6 +121,8 @@ class Viewer2D:
         Only renders those marked as alive.
         """
         alive = self.env.get_organisms().get_organisms()
+        food = self.env.get_organisms().get_food()
+
 
         for org in alive:
             x = int(org['x_pos'] * self.scale_x) + self.sidebar_width
@@ -135,6 +137,20 @@ class Viewer2D:
                 color = (0, 255, 0)
 
             pygame.draw.circle(self.screen, color, (x, y), 3)
+
+        for food in food:
+            x = int(food['x_pos'] * self.scale_x) + self.sidebar_width
+            y = int(food['y_pos'] * self.scale_y)
+            energy = food['energy']
+
+            if energy < 5:
+                color = (100, 100, 100)
+            elif energy < 15:
+                color = (100, 100, 100)
+            else:
+                color = (100, 100, 100)
+
+            pygame.draw.circle(self.screen, color, (x, y), 2)
 
     def draw_additional_stats(self):
         """

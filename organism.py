@@ -31,6 +31,13 @@ class Organisms:
             ('y_pos', np.float32),
         ])
 
+        self._food_dtype = np.dtype([
+            ('energy', np.float32),
+            ('consumed', np.bool),
+            ('x_pos', np.float32),
+            ('y_pos', np.float32),
+        ])
+        self._food = np.zeros((0), dtype=self._food_dtype)
         self._organisms = np.zeros((0,), dtype=self._organism_dtype)
         self._env = env
         # TODO: Load genes from json file
@@ -243,16 +250,39 @@ class Organisms:
     # TODO: Add method for organizim decision making
     def take_action(self):
         pass
+    
+    def get_food(self):
+        return self._food
 
     def remove_dead(self):
         """
         Removes dead organisms from the environment
         """
 
-        # Retrieves which organisms are dead and updates death counter
+        #  Retrieves which organisms are dead and updates death counter
         dead_mask = (self._organisms['energy'] <= 0)
-        self._env.add_deaths(np.count_nonzero(dead_mask))
+        n_dead   = np.count_nonzero(dead_mask)
 
-        # The dead are removed from the organisms array
-        survivors = self._organisms[~dead_mask]
-        self._organisms = survivors
+        #  Update the environment's death tally.
+        self._env.add_deaths(n_dead)
+
+        if n_dead > 0:
+            #  Pull out the dead organisms all at once.
+            dead_orgs = self._organisms[dead_mask]
+
+            #  Build an array of new food items.
+            #  One entry per dead organism.
+            new_food = np.zeros((n_dead,), dtype=self._food_dtype)
+
+            #  Use each organism’s size as its food energy.
+            #  Fallback to 0.0 if no org_ref is present.
+            new_food['energy']   = dead_orgs['energy_capacity']
+            new_food['consumed'] = False
+            new_food['x_pos']    = dead_orgs['x_pos']
+            new_food['y_pos']    = dead_orgs['y_pos']
+
+            # Append into your food array
+            self._food = np.concatenate((self._food, new_food))
+
+        # Finally, remove the dead from the organism list.
+        self._organisms = self._organisms[~dead_mask]
