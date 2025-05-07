@@ -266,7 +266,7 @@ class Genome:
         """Return the LocomotionGenes instance."""
         return self.locomotion
 
-    def replicate_genes(self) -> "Genome":
+    def replicate(self) -> "Genome":
         child = Genome(self.mutation_rate)
         child.morph = self.morph.mutate()
         child.metabolic = self.metabolic.mutate()
@@ -274,3 +274,9 @@ class Genome:
         child.behavioral = self.behavioral.mutate()
         child.locomotion = self.locomotion.mutate()
         return child
+
+    def compare_genes(self) -> bool:
+        """
+        Compares the genes between the organism and another organism
+        """
+        pass
