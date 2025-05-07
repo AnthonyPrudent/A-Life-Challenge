@@ -117,7 +117,6 @@ class MorphologicalGenes(Gene):
         self._attack = attack if attack is not None else self.random_stat()
         self._vision = vision if vision is not None else self.random_stat()
 
-
     def mutate(self) -> object:
         pass
 

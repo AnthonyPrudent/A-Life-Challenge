@@ -4,7 +4,7 @@ from viewer2dp import Viewer2D
 
 # Variables for setup/testing
 GRID_SIZE = 1000         # Determines size of environment
-NUM_ORGANISMS = 10000    # Attempt organism creation this many times
+NUM_ORGANISMS = 500    # Attempt organism creation this many times
 
 
 def main():

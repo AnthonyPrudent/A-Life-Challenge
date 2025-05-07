@@ -1,4 +1,5 @@
 import numpy as np
+import random
 
 
 class Organisms:
@@ -92,7 +93,7 @@ class Organisms:
                                          "heterotroph", dtype=np.str_)
             move_affordances = np.full((number_of_organisms,),
                                        "terrestrial", dtype=np.str_)
-            energies = np.full((number_of_organisms,), 0.5, dtype=np.float32)
+            energies = np.full((number_of_organisms,), 1.0, dtype=np.float32)
 
         # Randomize starting positions
         positions = np.random.randint(0, grid_size,
@@ -149,42 +150,105 @@ class Organisms:
         self._organisms = np.concatenate((self._organisms, spawned_orgs))
         self._env.add_births(self._organisms.shape[0])
 
-    # TODO: Implement mutation and
-    #       eventually different sexual reproduction types
-    def reproduce(self):
+    def _has_energy_to_reproduce(self):
+        """Checks if organism meets energy requirements to reproduce."""
+        return self._organisms['energy'] > self._organisms['reproduction_eff'] * self._organisms['energy_capacity']
+
+    # TODO: Implement mutation
+    def asexual_reproduce(self):
         """
         Causes all organisms that can to reproduce.
         Spawns offspring near the parent
         """
+        # TODO: Add check for asexual reproduction gene
+        can_reproduce = self._has_energy_to_reproduce() # and has asexual reproduction gene
 
-        # Obtains an array of all reproducing organisms
-        reproducing = (self._organisms['energy'] >
-                       self._organisms['reproduction_eff']
-                       * self._organisms['energy_capacity'])
-
-        if np.any(reproducing):
-
-            parents = self._organisms[reproducing]
+        if np.any(can_reproduce):
+            parents = self._organisms[can_reproduce]
             parent_reproduction_costs = (self._organisms['reproduction_eff']
-                                         [reproducing]
+                                         [can_reproduce]
                                          *
                                          self._organisms['energy_capacity']
-                                         [reproducing])
+                                         [can_reproduce])
 
-            # Put children randomly nearby
+            # Create offspring with same types of stats
+            offspring = np.zeros((parents.shape[0],), dtype=self._organism_dtype)
+
+            # Loop to inherit stat values for each stat type
+            for field in self._organism_dtype.names:
+                if field not in ('x_pos', 'y_pos', 'energy'):
+                    offspring[field] = parents[field]
+
+            # Generate random offset value for spawn location of offspring
             offset = np.random.uniform(-2, 2, size=(parents.shape[0], 2))
-            offspring = np.zeros((parents.shape[0],),
-                                 dtype=self._organism_dtype)
+
+            # Set offspring spawn location using the random offset
             offspring['x_pos'] = parents['x_pos'] + offset[:, 0]
             offspring['y_pos'] = parents['y_pos'] + offset[:, 1]
 
-            # Create offspring stats
+            # Set offspring starting energy
             offspring['energy'] = parent_reproduction_costs
-            self._organisms['energy'][reproducing] -= parent_reproduction_costs
+
+            # Reduce parents' energy based on previously calculated reproduction cost
+            self._organisms['energy'][can_reproduce] -= parent_reproduction_costs
             # TODO: Implement way to mutate offspring genes
-            self._organisms = np.concatenate((self.organisms, offspring))
+            self._organisms = np.concatenate((self._organisms, offspring))
 
             self._env.add_births(offspring.shape[0])
+
+    def sexual_reproduce(self):
+
+        # TODO: Add check for gene for sexual reproduction & mutation function
+        can_reproduce = self._has_energy_to_reproduce() # and has sexual reproduction
+
+        if np.any(can_reproduce):
+            parents = self._organisms[can_reproduce]
+            n = parents.shape[0]
+
+            # At least two parents that meet sexual reproduction requirements
+            if n < 2:
+                return
+
+            # Extract positions of eligible parents
+            positions = np.stack((parents['x_pos'], parents['y_pos']), axis=1)
+
+            # Compute pairwise distance matrix
+            dist_matrix = np.linalg.norm(positions[:, None, :] - positions[None, :, :], axis=1)
+
+            # Mark distances over threshold (or diagonal) as invalid
+            dist_threshold = 1.0
+            np.fill_diagonal(dist_matrix, np.inf)
+            potential_parent_pairs = np.argwhere(dist_matrix < dist_threshold)
+
+            used = set()            # Set of parents that have already reproduced
+            offspring_list = []
+
+            # Check that current potential parents have not already reproduced
+            for potential_parent1, potential_parent2 in potential_parent_pairs:
+                if potential_parent1 in used or potential_parent2 in used:
+                    continue
+
+                parent1 = parents[potential_parent1]
+                parent2 = parents[potential_parent2]
+
+                # Choose one parent to clone offspring from
+                if random.random() < 0.5:
+                    parent_to_inherit_from = parent1
+                else:
+                    parent_to_inherit_from = parent2
+
+                # Create offspring with same types of stats as chosen parent
+                offspring = np.zeros((parent_to_inherit_from.shape[0],), dtype=self._organism_dtype)
+
+                # Inherit float stats
+                for field in self._organism_dtype.names:
+                    if field in ['x_pos', 'y_pos', 'energy']:
+                        continue
+                    offspring[field] = parent1[field]
+
+
+
+
 
     # TODO: Add cost to organism movement based on the movement efficiency
     def move(self):
@@ -212,7 +276,7 @@ class Organisms:
         displacement = np.abs(
             move_jitter[:alive_idx.shape[0]]
             ).sum(axis=1)
-        self._organisms['energy'][alive_idx] -= 0.05 * displacement
+        # self._organisms['energy'][alive_idx] -= 0.01 * displacement
 
     # TODO: Cleanup further and add logic for move affordances
     def verify_positions(self, new_positions):

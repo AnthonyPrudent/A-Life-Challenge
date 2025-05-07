@@ -102,6 +102,7 @@ class Environment:
             # Organisms take an action
             # TODO: Implement action decision making,
             #       only moves currently
+            self._organisms.asexual_reproduce()
             self._organisms.move()
 
             # TODO: Could this be moved to an org method?
