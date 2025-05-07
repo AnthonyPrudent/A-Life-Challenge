@@ -160,13 +160,17 @@ class Organisms:
             self._organisms = np.concatenate((self.organisms, offspring))
             self._env.add_births(offspring.shape[0])
 
-    # TODO: Add cost to organism movement based on the movement efficiency
+    # TODO: Add cost to organism movement based on metabolism
     def move(self):
         """
         Moves all organisms randomly.
         """
+        genomes = self._organisms['genome']
         alive = (self._organisms['energy'] > 0)
-        speed = self._organisms['speed'][:, None]
+        speed = np.array([
+            genome.get_locomotion().speed for
+            genome in genomes
+        ], dtype=np.float32)
         jitter_shape = (alive.sum(), 2)
         move_jitter = np.random.uniform(-1, 1, size=jitter_shape) * speed
 
