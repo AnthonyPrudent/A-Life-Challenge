@@ -1,5 +1,6 @@
 import numpy as np
 import json
+import random
 
 
 class Organisms:
@@ -8,52 +9,54 @@ class Organisms:
     Keeps track of all organism's statistics.
     """
 
-    def __init__(self, env: object):
+    def __init__(self, env: object, mutation_rate: float):
         """
         Initialize an organism object.
 
         :param env: 2D Simulation Environment object
+        :param mutation_rate: How often mutations occur during reproduction
         """
 
         self._organism_dtype = np.dtype([
-            # species label
-            ('species',           np.str_,   15),
+            # — Species Lable
+            ('species',             np.str_, 15),
 
             # — Morphological Genes
-            ('size',              np.float32),
-            ('camouflage',        np.float32),
-            ('defense',           np.float32),
-            ('attack',            np.float32),
-            ('vision',            np.float32),
+            ('size',                np.float32),
+            ('camouflage',          np.float32),
+            ('defense',             np.float32),
+            ('attack',              np.float32),
+            ('vision',              np.float32),
 
             # — Metabolic Genes
-            ('metabolism_rate',   np.float32),
+            ('metabolism_rate',     np.float32),
             ('nutrient_efficiency', np.float32),
-            ('diet_type',         np.str_,   15),
+            ('diet_type',           np.str_, 15),
 
             # — ReproductionGenes
-            ('fertility_rate',    np.float32),
-            ('offspring_count',   np.int32),
-            ('reproduction_type', np.str_,   15),
+            ('fertility_rate',      np.float32),
+            ('offspring_count',     np.int32),
+            ('reproduction_type',   np.str_, 15),
 
             # — BehavioralGenes
-            ('pack_behavior',     np.bool_),
-            ('symbiotic',         np.bool_),
+            ('pack_behavior',       np.bool_),
+            ('symbiotic',           np.bool_),
 
             # — LocomotionGenes
-            ('swim',              np.bool_),
-            ('walk',              np.bool_),
-            ('fly',               np.bool_),
-            ('speed',             np.float32),
+            ('swim',                np.bool_),
+            ('walk',                np.bool_),
+            ('fly',                 np.bool_),
+            ('speed',               np.float32),
 
             # — Simulation bookkeeping
-            ('energy',            np.float32),
-            ('x_pos',             np.float32),
-            ('y_pos',             np.float32),
+            ('energy',              np.float32),
+            ('x_pos',               np.float32),
+            ('y_pos',               np.float32),
         ])
 
         self._organisms = np.zeros((0,), dtype=self._organism_dtype)
         self._env = env
+        self._mutation_rate = mutation_rate
         with open("gene_settings.json", "r") as file:
             self._gene_pool = json.load(file)
 
@@ -91,6 +94,7 @@ class Organisms:
             speeds = np.random.randint(1, 5,
                                        size=(number_of_organisms,
                                              ).astype(np.float32))
+
 
         # All initial organisms start with the same stats
         # TODO: Use gene pool to create default values, currently hard coded
@@ -155,14 +159,44 @@ class Organisms:
         # Take rows and columns of the positions and verify those on land
         ix = positions[:, 0].astype(np.int32)
         iy = positions[:, 1].astype(np.int32)
-        land_filter = env_terrain[iy, ix] >= 0
-        positions = positions[land_filter]
+
+        terrain_values = env_terrain[iy, ix]
+        swim_only = swimmers & ~walkers & ~flyers
+        walk_only = walkers & ~swimmers & ~flyers
+
+        # Flyers can be anywhere
+        valid_fly_positions = positions[flyers]
+
+        # Swimmers need water
+        valid_swim_positions = positions[swim_only & (terrain_values < 0)]
+
+        # Walkers need land
+        valid_walk_positions = positions[walk_only & (terrain_values >= 0)]
+
+        positions = np.concatenate((valid_fly_positions, valid_swim_positions,
+                                    valid_walk_positions), axis=0)
+
         valid_count = positions.shape[0]
 
         # Cut stat arrays to match valid count of organism spawn positions
         species = species[:valid_count]
-        speeds = speeds[:valid_count]
         sizes = sizes[:valid_count]
+        camos = camos[:valid_count]
+        defenses = defenses[:valid_count]
+        attacks = attacks[:valid_count]
+        visions = visions[:valid_count]
+        metabolism_rates = metabolism_rates[:valid_count]
+        nutrient_effs = nutrient_effs[:valid_count]
+        diet_types = diet_types[:valid_count]
+        fertility_rates = fertility_rates[:valid_count]
+        offspring_counts = offspring_counts[:valid_count]
+        reproduction_types = reproduction_types[:valid_count]
+        pack_behaviors = pack_behaviors[:valid_count]
+        symbiostic_behaviors = symbiostic_behaviors[:valid_count]
+        swimmers = swimmers[:valid_count]
+        walkers = walkers[:valid_count]
+        flyers = flyers[:valid_count]
+        speeds = speeds[:valid_count]
         energies = energies[:valid_count]
 
         # Create array of spawned organisms
@@ -178,6 +212,7 @@ class Organisms:
         spawned_orgs['diet_type'] = diet_types
         spawned_orgs['fertility_rate'] = fertility_rates
         spawned_orgs['offspring_count'] = offspring_counts
+        spawned_orgs['reproduction_type'] = reproduction_types
         spawned_orgs['pack_behavior'] = pack_behaviors
         spawned_orgs['symbiotic'] = symbiostic_behaviors
         spawned_orgs['swim'] = swimmers
@@ -200,19 +235,22 @@ class Organisms:
         """
 
         # Obtains an array of all reproducing organisms
-        reproducing = (self._organisms['energy'] >
-                       self._organisms['reproduction_eff']
-                       * self._organisms['energy_capacity'])
+        reproducing = (self._organisms['energy']
+                       >
+                       self._organisms['fertility_rate']
+                       *
+                       self._organisms['size'])
 
         if np.any(reproducing):
 
             parents = self._organisms[reproducing]
-            parent_reproduction_costs = (self._organisms['reproduction_eff']
+            parent_reproduction_costs = (self._organisms['fertility_rate']
                                          [reproducing]
                                          *
-                                         self._organisms['energy_capacity']
+                                         self._organisms['size']
                                          [reproducing])
 
+            # TODO: Implement number of children, currently just one offspring
             # Put children randomly nearby
             offset = np.random.uniform(-2, 2, size=(parents.shape[0], 2))
             offspring = np.zeros((parents.shape[0],),
@@ -220,10 +258,14 @@ class Organisms:
             offspring['x_pos'] = parents['x_pos'] + offset[:, 0]
             offspring['y_pos'] = parents['y_pos'] + offset[:, 1]
 
+            # Replicate genes from parent into offspring
+            self.replicate_genes(offspring, parents)
+
             # Create offspring stats
             offspring['energy'] = parent_reproduction_costs
+
             self._organisms['energy'][reproducing] -= parent_reproduction_costs
-            # TODO: Implement way to mutate offspring genes
+
             self._organisms = np.concatenate((self.organisms, offspring))
 
             self._env.add_births(offspring.shape[0])
@@ -273,6 +315,94 @@ class Organisms:
         new_y_positions = new_positions[:, 1]
         self._organisms['x_pos'] = new_x_positions
         self._organisms['y_pos'] = new_y_positions
+
+    def replicate_genes(self, offspring, parents):
+        """
+        Replicate the genes of the parents onto the offspring,
+        applying mutation to genes and speciation
+
+        :param offspring: NumPy array of organism data type
+        :param parents: NumPy array of organism data type
+        """
+        mutated = np.random.rand(
+            len(self._organisms)
+            ) < self._mutation_rate
+
+        # Randomize genes for mutated organisms
+        mutated_offspring = offspring[mutated]
+        mutated_count = mutated_offspring.shape[0]
+
+        # TODO: Use AI to change species name of mutated organisms
+        # TODO: Incorporate master gene pool
+        DIET_TYPES = ['Herb', 'Omni', 'Carn', 'Photo', 'Parasite']
+        REPRODUCTION_TYPES = ["Sexual", "Asexual"]
+
+        species = np.full((mutated_count,), "Mutated Organism", dtype=np.str_)
+        mutated_offspring['species'] = species
+
+        sizes = np.random.uniform(0.0, 1.0,
+                                  size=(mutated_count,).astype(np.float32))
+        mutated_offspring['size'] = sizes
+
+        camos = np.random.uniform(0.0, 1.0,
+                                  size=(mutated_count,).astype(np.float32))
+        mutated_offspring['camoflauge'] = camos
+
+        defenses = np.random.uniform(0.0, 1.0,
+                                     size=(mutated_count,).astype(np.float32))
+        mutated_offspring['defense'] = defenses
+
+        attacks = np.random.uniform(0.0, 1.0,
+                                    size=(mutated_count,).astype(np.float32))
+        mutated_offspring['attack'] = attacks
+
+        visions = np.random.uniform(0.0, 1.0,
+                                    size=(mutated_count,).astype(np.float32))
+        mutated_offspring['vision'] = visions
+
+        metabolism_rates = np.random.uniform(0.0, 1.0,
+                                             size=(mutated_count,)
+                                             .astype(np.float32))
+        mutated_offspring['metabolism_rate'] = metabolism_rates
+
+        nutrient_effs = np.random.uniform(0.0, 1.0,
+                                          size=(mutated_count,)
+                                          .astype(np.float32))
+        mutated_offspring['nutrient_efficiency'] = nutrient_effs
+
+        diets = np.random.choice(DIET_TYPES, size=mutated_count, replace=True)
+        mutated_offspring['diet_type'] = diets
+
+        fertility_rates = np.random.uniform(0.0, 1.0,
+                                            size=(mutated_count,)
+                                            .astype(np.float32))
+        mutated_offspring['fertility_rate'] = fertility_rates
+
+        offspring_counts = np.random.randint(0, 11,
+                                             size=(mutated_count,)
+                                             .astype(np.float32))
+        mutated_offspring['offspring_count'] = offspring_counts
+
+        reproductions = np.random.choice(REPRODUCTION_TYPES,
+                                         size=mutated_count, replace=True)
+        mutated_offspring['reproduction_type'] = reproductions
+
+        pack_behaviors = np.random.rand(mutated_count) < 0.5
+        mutated_offspring['pack_behavior'] = pack_behaviors
+
+        mutated_offspring['symbiotic'] = np.random.rand(mutated_count) < 0.5
+        mutated_offspring['swim'] = np.random.rand(mutated_count) < 0.5
+        mutated_offspring['walk'] = np.random.rand(mutated_count) < 0.5
+        mutated_offspring['fly'] = np.random.rand(mutated_count) < 0.5
+
+        speeds = np.random.uniform(0.0, 1.0,
+                                   size=(mutated_count,).astype(np.float32))
+        mutated_offspring['speed'] = speeds
+
+        # Non mutated offspring have same genes as parent
+        offspring[~mutated] = parents[~mutated].copy()
+
+        return offspring
 
     # TODO: Cleanup since organisms eat other organisms
     # Once we deal with speciation, organisms will eat plantlike organisms
