@@ -156,6 +156,9 @@ class Organisms:
             ], dtype=object)
             offspring['genome'] = offspring_genomes
 
+            # TODO: boolean mutation mask
+            
+
             # Stores the offsprings
             self._organisms = np.concatenate((self.organisms, offspring))
             self._env.add_births(offspring.shape[0])
@@ -218,7 +221,7 @@ class Organisms:
         """
         pass
 
-    # TODO: Add method for organizim decision making
+    # TODO: Add method for organism decision making
     def take_action(self):
         pass
 

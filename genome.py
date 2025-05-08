@@ -53,6 +53,9 @@ class MorphologicalGenes(Gene):
         new_vals[mask] = np.random.rand(mask.sum())
         return MorphologicalGenes(self.mutation_rate, new_vals)
 
+    def compare(self, other_genes):
+        return self.values == other_genes.values
+
 
 class MetabolicGenes(Gene):
     """
@@ -97,6 +100,12 @@ class MetabolicGenes(Gene):
 
         return MetabolicGenes(self.mutation_rate, new_num, new_diet)
 
+    def compare(self, other_genes):
+        return all([
+            self.numeric == other_genes.numeric,
+            self.diet_type == other_genes.diet_type
+        ])
+
 
 class ReproductionGenes(Gene):
     """
@@ -128,6 +137,13 @@ class ReproductionGenes(Gene):
             if reproduction_type is not None
             else np.random.choice(self.REPRO_TYPES)
         )
+
+    def compare(self, other):
+        return all([
+            self.fertility_rate == other.fertility_rate,
+            self.offspring_count == other.offspring_count,
+            self.reproduction_type == other.reproduction_type
+        ])
 
     def mutate(self) -> "ReproductionGenes":
         # fertility float
@@ -175,6 +191,9 @@ class BehavioralGenes(Gene):
     def symbiotic(self) -> bool:
         return bool(self.bools[1])
 
+    def compare(self, other):
+        return self.bools == other.bools
+
     def mutate(self) -> "BehavioralGenes":
         mask = np.random.rand(2) < self.mutation_rate
         new_b = self.bools.copy()
@@ -217,6 +236,10 @@ class LocomotionGenes(Gene):
     @property
     def fly(self) -> bool:
         return bool(self.bools[2])
+
+    def compare(self, other):
+        result = self.bools == other.bools
+        return result and self.speed == other.speed
 
     def mutate(self) -> "LocomotionGenes":
         mask = np.random.rand(3) < self.mutation_rate
@@ -275,8 +298,14 @@ class Genome:
         child.locomotion = self.locomotion.mutate()
         return child
 
-    def compare_genes(self) -> bool:
+    def compare(self, other) -> bool:
         """
         Compares the genes between the organism and another organism
         """
-        pass
+        return all([
+            self.get_morphological().compare(other.get_morphological()),
+            self.get_metabolic().compare(other.get_metabolic()),
+            self.get_reproduction().compare(other.get_reproduction()),
+            self.get_behavioral().compare(other.get_behavioral()),
+            self.get_locomotion().compare(other.get_locomotion())
+            ])
