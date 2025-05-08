@@ -6,6 +6,12 @@ from viewer2dp import Viewer2D
 
 pygame.init()
 
+import sys
+from unittest.mock import MagicMock
+
+sys.modules['tkinter'] = MagicMock()
+sys.modules['tkinter.filedialog'] = MagicMock()
+
 
 @pytest.fixture
 def dummy_screen():
