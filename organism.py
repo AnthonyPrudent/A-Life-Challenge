@@ -2,13 +2,14 @@ import numpy as np
 import random
 
 
+
 class Organisms:
     """
     Represents all organisms in an environment.
     Keeps track of all organism's statistics.
     """
 
-    def __init__(self, env: object):
+    def __init__(self, env):
         """
         Initialize an organism object.
 
@@ -36,6 +37,9 @@ class Organisms:
         self._env = env
         # TODO: Load genes from json file
         self._gene_pool = None
+
+    def get_organism_dtype(self):
+        return self._organism_dtype
 
     # Get methods
     def get_organisms(self):
@@ -154,7 +158,11 @@ class Organisms:
         """Checks if organism meets energy requirements to reproduce."""
         return self._organisms['energy'] > self._organisms['reproduction_eff'] * self._organisms['energy_capacity']
 
-    # TODO: Implement mutation
+    def clone_genome(self, offspring, parents):
+        """Creates a replica genome for the child """
+        offspring[:] = parents
+
+    # TODO: Implement mutation function
     def asexual_reproduce(self):
         """
         Causes all organisms that can to reproduce.
@@ -172,15 +180,14 @@ class Organisms:
                                          [can_reproduce])
 
             # Create offspring with same types of stats
+            # TODO: Check if multiple offspring can be created
             offspring = np.zeros((parents.shape[0],), dtype=self._organism_dtype)
 
-            # Loop to inherit stat values for each stat type
-            for field in self._organism_dtype.names:
-                if field not in ('x_pos', 'y_pos', 'energy'):
-                    offspring[field] = parents[field]
+            # TODO: Check for mutation "trigger", if True call mutation function else copy parent genes
+            self.clone_genome(offspring, parents)
 
             # Generate random offset value for spawn location of offspring
-            offset = np.random.uniform(-2, 2, size=(parents.shape[0], 2))
+            offset = np.random.uniform(-5, 5, size=(parents.shape[0], 2))
 
             # Set offspring spawn location using the random offset
             offspring['x_pos'] = parents['x_pos'] + offset[:, 0]
@@ -191,7 +198,7 @@ class Organisms:
 
             # Reduce parents' energy based on previously calculated reproduction cost
             self._organisms['energy'][can_reproduce] -= parent_reproduction_costs
-            # TODO: Implement way to mutate offspring genes
+
             self._organisms = np.concatenate((self._organisms, offspring))
 
             self._env.add_births(offspring.shape[0])
