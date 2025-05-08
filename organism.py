@@ -1,5 +1,7 @@
 import numpy as np
 import json
+import random
+import string
 
 
 class Organisms:
@@ -340,12 +342,12 @@ class Organisms:
         """
         count = organisms.shape[0]
 
-        # TODO: Use AI to change species name of mutated organisms
         # TODO: Incorporate master gene pool
         DIET_TYPES = ['Herb', 'Omni', 'Carn', 'Photo', 'Parasite']
         REPRODUCTION_TYPES = ["Sexual", "Asexual"]
 
-        species = np.full((count,), "Mutated Organism", dtype=np.str_)
+        # TODO: Use AI to change species name of mutated organisms
+        species = np.array(random_names(count))
         organisms['species'] = species
 
         sizes = np.random.uniform(0.0, 1.0,
@@ -433,3 +435,16 @@ class Organisms:
         # The dead are removed from the organisms array
         survivors = self._organisms[~dead_mask]
         self._organisms = survivors
+
+
+def random_names(number_of_names):
+
+    names = []
+
+    for i in range(number_of_names):
+        random_string = ''.join(random.choices(
+            string.ascii_letters + string.digits, k=15))
+
+        names.append(random_string)
+
+    return names
