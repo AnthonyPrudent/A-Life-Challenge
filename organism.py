@@ -61,9 +61,18 @@ class Organisms:
         with open("gene_settings.json", "r") as file:
             self._gene_pool = json.load(file)
 
+        self._ancestry = {}
+        self._species_count = {}
+
     # Get methods
     def get_organisms(self):
         return self._organisms
+
+    def get_ancestries(self):
+        return self._ancestry
+
+    def get_species_count(self):
+        return self._species_count
 
     # Set methods
     def set_organisms(self, new_organisms):
@@ -223,6 +232,8 @@ class Organisms:
         # Add new data to existing organisms array
         self._organisms = np.concatenate((self._organisms, spawned_orgs))
         self._env.add_births(self._organisms.shape[0])
+        self._ancestry[species[0]] = []
+        self._species_count[species[0]] = self._organisms.shape[0]
 
     # TODO: Implement mutation and
     #       eventually different sexual reproduction types
@@ -262,6 +273,20 @@ class Organisms:
             self._organisms['energy'][reproducing] -= parent_reproduction_costs
             offspring['x_pos'] = parents['x_pos'] + offset[:, 0]
             offspring['y_pos'] = parents['y_pos'] + offset[:, 1]
+
+            # TODO: Possible to enhance this?
+            # Handles speciation and lineage tracking
+            for i in range(offspring.shape[0]):
+                child = offspring['species'][i]
+                parent = parents['species'][i]
+
+                if parent == child:
+                    self._species_count[parent] += 1
+
+                else:
+                    self._species_count[child] = 1
+                    self._ancestry[child] = self._ancestry[parent].copy()
+                    self._ancestry[child].append(parent)
 
             self._organisms = np.concatenate((self.organisms, offspring))
             self._env.add_births(offspring.shape[0])
