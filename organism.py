@@ -1,4 +1,5 @@
 import numpy as np
+import json
 
 
 class Organisms:
@@ -15,26 +16,46 @@ class Organisms:
         """
 
         self._organism_dtype = np.dtype([
-            ('species', np.str_, 15),
-            ('size', np.float32),
-            ('speed', np.float32),
-            ('max_age', np.float32),
-            ('energy_capacity', np.float32),
-            ('move_eff', np.float32),
-            ('reproduction_eff', np.float32),
-            ('min_temp_tol', np.float32),
-            ('max_temp_tol', np.float32),
-            ('energy_prod', np.str_, 15),
-            ('move_aff', np.str_, 15),
-            ('energy', np.float32),
-            ('x_pos', np.float32),
-            ('y_pos', np.float32),
+            # species label
+            ('species',           np.str_,   15),
+
+            # — Morphological Genes
+            ('size',              np.float32),
+            ('camouflage',        np.float32),
+            ('defense',           np.float32),
+            ('attack',            np.float32),
+            ('vision',            np.float32),
+
+            # — Metabolic Genes
+            ('metabolism_rate',   np.float32),
+            ('nutrient_efficiency', np.float32),
+            ('diet_type',         np.str_,   15),
+
+            # — ReproductionGenes
+            ('fertility_rate',    np.float32),
+            ('offspring_count',   np.int32),
+            ('reproduction_type', np.str_,   15),
+
+            # — BehavioralGenes
+            ('pack_behavior',     np.bool_),
+            ('symbiotic',         np.bool_),
+
+            # — LocomotionGenes
+            ('swim',              np.bool_),
+            ('walk',              np.bool_),
+            ('fly',               np.bool_),
+            ('speed',             np.float32),
+
+            # — Simulation bookkeeping
+            ('energy',            np.float32),
+            ('x_pos',             np.float32),
+            ('y_pos',             np.float32),
         ])
 
         self._organisms = np.zeros((0,), dtype=self._organism_dtype)
         self._env = env
-        # TODO: Load genes from json file
-        self._gene_pool = None
+        with open("gene_settings.json", "r") as file:
+            self._gene_pool = json.load(file)
 
     # Get methods
     def get_organisms(self):
@@ -74,25 +95,49 @@ class Organisms:
         # All initial organisms start with the same stats
         # TODO: Use gene pool to create default values, currently hard coded
         else:
-            species = np.full((number_of_organisms,), "ORG", dtype=np.str_)
-            sizes = np.full((number_of_organisms,), 1, dtype=np.float32)
-            speeds = np.full((number_of_organisms,), 1, dtype=np.float32)
-            max_ages = np.full((number_of_organisms,), 5, dtype=np.float32)
-            energy_capacities = np.full((number_of_organisms,),
-                                        1.0, dtype=np.float32)
-            move_efficiencies = np.full((number_of_organisms,),
-                                        0.01, dtype=np.float32)
-            reproduction_efficiencies = np.full((number_of_organisms,),
-                                                0.1, dtype=np.float32)
-            min_temp_tols = np.full((number_of_organisms,),
-                                    2, dtype=np.float32)
-            max_temp_tols = np.full((number_of_organisms,),
-                                    2, dtype=np.float32)
-            energy_productions = np.full((number_of_organisms,),
-                                         "heterotroph", dtype=np.str_)
-            move_affordances = np.full((number_of_organisms,),
-                                       "terrestrial", dtype=np.str_)
-            energies = np.full((number_of_organisms,), 0.5, dtype=np.float32)
+            species = np.full((number_of_organisms,), "Original Organism",
+                              dtype=np.str_)
+
+            # — Morphological Genes
+            sizes = np.full((number_of_organisms,), 0.5, dtype=np.float32)
+            camos = np.full((number_of_organisms,), 0.5, dtype=np.float32)
+            defenses = np.full((number_of_organisms,), 0.5, dtype=np.float32)
+            attacks = np.full((number_of_organisms,), 0.5, dtype=np.float32)
+            visions = np.full((number_of_organisms,), 0.5, dtype=np.float32)
+
+            # — Metabolic Genes
+            metabolism_rates = np.full((number_of_organisms,),
+                                       0.5, dtype=np.float32)
+            nutrient_effs = np.full((number_of_organisms,),
+                                    0.5, dtype=np.float32)
+            diet_types = np.full((number_of_organisms,),
+                                 "Photo", dtype=np.str_)
+
+            # — ReproductionGenes
+            fertility_rates = np.full((number_of_organisms,),
+                                      0.5, dtype=np.float32)
+            offspring_counts = np.full((number_of_organisms,),
+                                       1, dtype=np.int32)
+            reproduction_types = np.full((number_of_organisms,),
+                                         "Asexual", dtype=np.str_)
+
+            # — BehavioralGenes
+            pack_behaviors = np.full((number_of_organisms,),
+                                     False, dtype=np.bool_)
+            symbiostic_behaviors = np.full((number_of_organisms,),
+                                           False, dtype=np.bool_)
+
+            # — LocomotionGenes
+            swimmers = np.full((number_of_organisms,),
+                               False, dtype=np.bool_)
+            walkers = np.full((number_of_organisms,),
+                              True, dtype=np.bool_)
+            flyers = np.full((number_of_organisms,),
+                             False, dtype=np.bool_)
+            speeds = np.full((number_of_organisms,), 0.5, dtype=np.float32)
+
+            # — Simulation bookkeeping
+            energies = np.full((number_of_organisms,), 0.25, dtype=np.float32)
 
         # Randomize starting positions
         positions = np.random.randint(0, grid_size,
@@ -118,30 +163,27 @@ class Organisms:
         species = species[:valid_count]
         speeds = speeds[:valid_count]
         sizes = sizes[:valid_count]
-        max_ages = max_ages[:valid_count]
-        energy_capacities = energy_capacities[:valid_count]
-        move_efficiencies = move_efficiencies[:valid_count]
-        reproduction_efficiencies = reproduction_efficiencies[:valid_count]
-        min_temp_tols = min_temp_tols[:valid_count]
-        max_temp_tols = max_temp_tols[:valid_count]
-        energy_productions = energy_productions[:valid_count]
-        move_affordances = move_affordances[:valid_count]
         energies = energies[:valid_count]
 
         # Create array of spawned organisms
         spawned_orgs = np.zeros((valid_count,), dtype=self._organism_dtype)
         spawned_orgs['species'] = species
         spawned_orgs['size'] = sizes
+        spawned_orgs['camoflauge'] = camos
+        spawned_orgs['defense'] = defenses
+        spawned_orgs['attack'] = attacks
+        spawned_orgs['vision'] = visions
+        spawned_orgs['metabolism_rate'] = metabolism_rates
+        spawned_orgs['nutrient_efficiency'] = nutrient_effs
+        spawned_orgs['diet_type'] = diet_types
+        spawned_orgs['fertility_rate'] = fertility_rates
+        spawned_orgs['offspring_count'] = offspring_counts
+        spawned_orgs['pack_behavior'] = pack_behaviors
+        spawned_orgs['symbiotic'] = symbiostic_behaviors
+        spawned_orgs['swim'] = swimmers
+        spawned_orgs['walk'] = walkers
+        spawned_orgs['fly'] = flyers
         spawned_orgs['speed'] = speeds
-        spawned_orgs['max_age'] = max_ages
-        spawned_orgs['energy_capacity'] = energy_capacities
-        spawned_orgs['move_eff'] = move_efficiencies
-        spawned_orgs['reproduction_eff'] = reproduction_efficiencies
-        spawned_orgs['min_temp_tol'] = min_temp_tols
-        spawned_orgs['max_temp_tol'] = max_temp_tols
-        spawned_orgs['energy_prod'] = energy_productions
-        spawned_orgs['move_aff'] = move_affordances
-        spawned_orgs['energy'] = energies
         spawned_orgs['x_pos'] = positions[:, 0]
         spawned_orgs['y_pos'] = positions[:, 1]
 
