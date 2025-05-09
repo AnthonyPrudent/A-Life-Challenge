@@ -11,12 +11,13 @@ class Viewer2D:
     """
     Plane-based viewer (continuous 2D coordinates) with sidebar stats.
     """
+
     def __init__(
             self,
             environment,
             window_size=(1000, 800),
             sidebar_width=200
-            ):
+    ):
         """
         Stores an a-life environment to render, window size and sidebar are
         default (1000,800)/200 respectively
@@ -47,7 +48,8 @@ class Viewer2D:
         self._running = True
 
         # Creates reference to button objects for use in draw/handle_event functions
-        self._stop_start_button = create_stop_start_button(self.screen, self.font, self._running)
+        self._stop_start_button = create_stop_start_button(
+            self.screen, self.font, self._running)
         self._save_button = create_save_button(self.screen, self.font)
         self._load_button = create_load_button(self.screen, self.font)
         self._skip_button = create_skip_button(self.screen, self.font)
@@ -77,7 +79,7 @@ class Viewer2D:
         self._skip_button.draw_button()
 
         pygame.display.flip()
-        self.clock.tick(5)
+        self.clock.tick(10)
         self.timestep += 1
 
     def draw_terrain(self):
@@ -96,7 +98,7 @@ class Viewer2D:
         land_mask = terrain >= 0.0
         rgb[land_mask] = np.asarray(
             [34, 139, 34], dtype=np.uint8
-            )
+        )
 
         # Water gradient
         water_mask = terrain < 0.0
@@ -112,27 +114,38 @@ class Viewer2D:
         pygame.surfarray.blit_array(terrain_surface, rgb.swapaxes(0, 1))
         terrain_surface = pygame.transform.scale(
             terrain_surface, self.main_area
-            )
+        )
         self.screen.blit(terrain_surface, (self.sidebar_width, 0))
 
     def draw_organisms(self):
         """
         Renders all organisms as colored dots depending on energy level.
         Only renders those marked as alive.
+        Energy → color mapping:
+        e < 5   → red
+        5 ≤ e < 10  → red-orange
+        10 ≤ e < 20 → orange-yellow
+        20 ≤ e < 40 → yellow
+        40 ≤ e < 80 → white
+        e ≥ 80      → white
         """
         alive = self.env.get_organisms().get_organisms()
 
         for org in alive:
             x = int(org['x_pos'] * self.scale_x) + self.sidebar_width
             y = int(org['y_pos'] * self.scale_y)
-            energy = org['energy']
+            e = float(org['energy'])
 
-            if energy < 5:
-                color = (255, 0, 0)
-            elif energy < 15:
-                color = (255, 255, 0)
+            if e < 5:
+                color = (255,   0,   0)   # red
+            elif e < 10:
+                color = (255,  69,   0)   # red-orange
+            elif e < 20:
+                color = (255, 165,   0)   # orange-yellow
+            elif e < 40:
+                color = (255, 255,   0)   # yellow
             else:
-                color = (0, 255, 0)
+                color = (255, 255, 255)   # white for e ≥ 40
 
             pygame.draw.circle(self.screen, color, (x, y), 3)
 
@@ -147,13 +160,13 @@ class Viewer2D:
 
         birth_text = self.font.render(
             f"Births: {births}", True, (255, 255, 255)
-            )
+        )
         death_text = self.font.render(
             f"Deaths: {deaths}", True, (255, 255, 255)
-            )
+        )
         energy_text = self.font.render(
             f"Avg Energy: {avg_energy:.2f}", True, (255, 255, 255)
-            )
+        )
 
         self.screen.blit(birth_text, (10, 50))
         self.screen.blit(death_text, (10, 70))
@@ -166,7 +179,7 @@ class Viewer2D:
         pygame.draw.rect(
             self.screen, (30, 30, 30),
             pygame.Rect(0, 0, self.sidebar_width, self.window_size[1])
-            )
+        )
 
     def draw_generation_stat(self):
         """
@@ -174,7 +187,7 @@ class Viewer2D:
         """
         gen_text = self.font.render(
             f"Generation: {self.timestep}", True, (255, 255, 255)
-            )
+        )
         self.screen.blit(gen_text, (10, 10))
 
     def draw_total_population_stat(self):
@@ -203,7 +216,8 @@ class Viewer2D:
                     self._running = not self._running
 
                 if self._save_button.get_rectangle().collidepoint(event.pos):               # Save simulation
-                    self._save_button.save_simulation_prompt(self.env, self.timestep)
+                    self._save_button.save_simulation_prompt(
+                        self.env, self.timestep)
 
                 if self._load_button.get_rectangle().collidepoint(event.pos):               # Load simulation
                     saved_env, saved_timestep = self._load_button.load_simulation_prompt()
