@@ -36,6 +36,9 @@ class Environment:
         return self._terrain
 
     def get_organisms(self):
+        return self._organisms.x_pos
+
+    def get_org_obj(self):
         return self._organisms
 
     def get_total_births(self):
@@ -69,22 +72,16 @@ class Environment:
         Steps one generation forward in the simulation.
         """
 
-        organisms = self._organisms.get_organisms()
+        N = self._organisms.x_pos.size
+        if N == 0:
+            return
 
-        # Only steps while organisms present TODO: May change as env developes
-        if organisms.shape[0] != 0:
-
-            # Organisms take an action
-            # TODO: Implement action decision making,
-            #       only moves currently
-
-            self._organisms.build_spatial_index()
-            self._organisms.move()
-            self._organisms.resolve_attacks()
-            # TODO: Could this be moved to an org method?
-            self._organisms.remove_dead()
-
-            self._generation += 1
+        # Organisms take an action
+        self._organisms.build_spatial_index()
+        self._organisms.move()
+        self._organisms.resolve_attacks()
+        self._organisms.remove_dead()
+        self._generation += 1
 
 
 def generate_fractal_terrain(

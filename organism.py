@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.spatial import cKDTree
-
+from numba import cuda, prange, njit, jit
+from organisms_cuda import _move_kernel
 
 class Organisms:
     """
@@ -14,63 +15,68 @@ class Organisms:
 
         :param env: 2D Simulation Environment object
         """
+        self.species = np.zeros(0, dtype=np.int8)
+        self.size = np.zeros(0, dtype=np.float32)
+        self.camouflage = np.zeros(0, dtype=np.float32)
+        self.defense = np.zeros(0, dtype=np.float32)
+        self.attack = np.zeros(0, dtype=np.float32)
+        self.vision = np.zeros(0, dtype=np.float32)
 
-        self._organism_dtype = np.dtype([
-            # species label
-            ('species',           np.str_,   15),
+        self.metabolism_rate = np.zeros(0, dtype=np.float32)
+        self.nutrient_efficiency = np.zeros(0, dtype=np.float32)
+        self.diet_type = np.zeros(0, dtype=np.int8)
 
-            # — MorphologicalGenes (size, camouflage, defense, attack, vision) —
-            ('size',              np.float32),
-            ('camouflage',        np.float32),
-            ('defense',           np.float32),
-            ('attack',            np.float32),
-            ('vision',            np.float32),
+        self.fertility_rate = np.zeros(0, dtype=np.float32)
+        self.offspring_count = np.zeros(0, dtype=np.int32)
+        self.reproduction_type = np.zeros(0, dtype=np.int8)
 
-            # — MetabolicGenes (metabolism_rate, nutrient_efficiency, diet_type) —
-            ('metabolism_rate',   np.float32),
-            ('nutrient_efficiency', np.float32),
-            ('diet_type',         np.str_,   15),
+        self.pack_behavior = np.zeros(0, dtype=np.bool_)
+        self.symbiotic = np.zeros(0, dtype=np.bool_)
 
-            # — ReproductionGenes (fertility_rate, offspring_count, reproduction_type) —
-            ('fertility_rate',    np.float32),
-            ('offspring_count',   np.int32),
-            ('reproduction_type', np.str_,   15),
+        self.swim = np.zeros(0, dtype=np.bool_)
+        self.walk = np.zeros(0, dtype=np.bool_)
+        self.fly = np.zeros(0, dtype=np.bool_)
+        self.speed = np.zeros(0, dtype=np.float32)
 
-            # — BehavioralGenes (pack_behavior, symbiotic) —
-            ('pack_behavior',     np.bool_),
-            ('symbiotic',         np.bool_),
-
-            # — LocomotionGenes (swim, walk, fly, speed) —
-            ('swim',              np.bool_),
-            ('walk',              np.bool_),
-            ('fly',               np.bool_),
-            ('speed',             np.float32),
-
-            # — Simulation bookkeeping —
-            ('energy',            np.float32),
-            ('x_pos',             np.float32),
-            ('y_pos',             np.float32),
-        ])
+        self.energy = np.zeros(0, dtype=np.float32)
+        self.x_pos = np.zeros(0, dtype=np.float32)
+        self.y_pos = np.zeros(0, dtype=np.float32)
 
         self._pos_tree = None
-        self._organisms = np.zeros((0,), dtype=self._organism_dtype)
         self._env = env
-        # TODO: Load genes from json file
+        self._dirs = np.array([[1, 0], [-1, 0], [0, 1], [0, -1]], np.float32)
         self._gene_pool = None
-        
-        # Garbage collection optimization - scratch buffers
-        self._dirs = np.array([[1,0],[-1,0],[0,1],[0,-1]], np.float32)
 
     def load_genes(self, gene_pool):
+        """
+        Load gene ranges/options from the provided gene_pool dict (as returned
+        by load_genes_from_file). Builds integer mappings for categorical genes.
+        """
         self._gene_pool = gene_pool
+
+        # —— Diet type mapping ——
+        # e.g. gene_pool['diet_type'] == ["Herb","Omni","Carn","Photo","Parasite"]
+        if 'diet_type' in gene_pool:
+            self._diet_options = gene_pool['diet_type']
+            # map each category string to a small integer code
+            self._diet_map = {opt: idx for idx, opt in enumerate(self._diet_options)}
+        else:
+            self._diet_options = []
+            self._diet_map = {}
+
+        # —— Reproduction type mapping ——
+        # e.g. gene_pool['reproduction_type'] == ["Sexual","Asexual"]
+        if 'reproduction_type' in gene_pool:
+            self._repro_options = gene_pool['reproduction_type']
+            self._repro_map = {opt: idx for idx, opt in enumerate(self._repro_options)}
+        else:
+            self._repro_options = []
+            self._repro_map = {}
+
 
     # Get methods
     def get_organisms(self):
         return self._organisms
-
-    # Set methods
-    def set_organisms(self, new_organisms):
-        self._organisms = new_organisms
 
     def build_spatial_index(self):
         """
@@ -79,402 +85,243 @@ class Organisms:
         radius or nearest-neighbor queries via self._pos_tree.
         """
         # if we have any organisms, stack their x/y into an (N,2) array…
-        if self._organisms.shape[0] > 0:
-            coords = np.stack(
-                (self._organisms['x_pos'], self._organisms['y_pos']),
-                axis=1
-            )
+        if self.x_pos.size > 0:
+            coords = np.stack((self.x_pos, self.y_pos), axis=1)
+
             # cKDTree is much faster for large N
             self._pos_tree = cKDTree(coords)
         else:
             # no points → no tree
             self._pos_tree = None
 
-    def spawn_initial_organisms(self, number_of_organisms: int,
-                                randomize: bool = False) -> int:
+    def spawn_initial_organisms(
+        self,
+        number_of_organisms: int,
+        randomize: bool = False
+    ) -> int:
         """
-        Spawns the initial organisms in the simulation.
-        Organism stats can be randomized if desired.
-        Updates the birth counter in the environment.
-
-        :param number_of_organisms: Number of organisms to spawn
-        :param randomize: Request to randomize stats of spawned organisms
-        :returns: how many organisms were actually placed
+        Spawns up to `number_of_organisms` with random traits (or defaults),
+        filters out any that land out of bounds or on the wrong terrain,
+        appends them to the existing arrays, and returns how many were placed.
         """
         import numpy as np
 
-        # --- get environment info ---
-        env_width = self._env.get_width()
-        env_length = self._env.get_length()
-        env_terrain = self._env.get_terrain()
-        grid_size = env_width
+        # Environment info
+        w = self._env.get_width()
+        h = self._env.get_length()
+        terrain = self._env.get_terrain()  # assume shape (h, w)
 
-        # --- build raw parameter arrays ---
         n = number_of_organisms
-        # string dtype shorthand
-        str15 = np.dtype('U15')
 
+        # Generate trait arrays of length n
+        # ─── categorical codes ───
+        species_arr = np.zeros(n, dtype=np.int8)              # all same species=0
+        diet_arr    = np.full(n, self._diet_map["Herb"], dtype=np.int8)
+        repro_arr   = np.full(n, self._repro_map["Asexual"],    dtype=np.int8)
+
+        # ─── continuous traits ───
         if randomize:
-            # species label
-            species_arr = np.full((n,), "ORG", dtype=str15)
-            #
-            # — MorphologicalGenes —
-            size_arr = np.random.rand(n).astype(np.float32)
-            camouflage_arr = np.random.rand(n).astype(np.float32)
-            defense_arr = np.random.rand(n).astype(np.float32)
-            attack_arr = np.random.rand(n).astype(np.float32)
-            vision_arr = np.random.rand(n).astype(np.float32)
-            #
-            # — MetabolicGenes —
-            metabolism_rate_arr = np.random.rand(n).astype(np.float32)
-            nutrient_efficiency_arr = np.random.rand(n).astype(np.float32)
-            diet_type_arr = np.full((n,), "heterotroph", dtype=str15)
-            #
-            # — ReproductionGenes —
-            fertility_rate_arr = np.random.rand(n).astype(np.float32)
-            offspring_count_arr = np.random.randint(
-                1, 5, size=(n,)).astype(np.int32)
-            reproduction_type_arr = np.full((n,), "asexual", dtype=str15)
-            #
-            # — BehavioralGenes —
-            pack_behavior_arr = np.random.choice(
-                [False, True], size=(n,)).astype(np.bool_)
-            symbiotic_arr = np.random.choice(
-                [False, True], size=(n,)).astype(np.bool_)
-            # — LocomotionGenes —
-            swim_arr = np.random.choice(
-                [False, True], size=(n,)).astype(np.bool_)
-            walk_arr = np.random.choice(
-                [False, True], size=(n,)).astype(np.bool_)
-            fly_arr = np.random.choice(
-                [False, True], size=(n,)).astype(np.bool_)
-            speed_arr = np.random.uniform(
-                0.1, 5.0, size=(n,)).astype(np.float32)
-            #
-            # — Simulation bookkeeping —
-            energy_arr = np.random.uniform(
-                10, 20, size=(n,)).astype(np.float32)
+            size_arr               = np.random.rand(n).astype(np.float32)
+            camouflage_arr         = np.random.rand(n).astype(np.float32)
+            defense_arr            = np.random.rand(n).astype(np.float32)
+            attack_arr             = np.random.rand(n).astype(np.float32)
+            vision_arr             = np.random.rand(n).astype(np.float32)
+            metabolism_rate_arr    = np.random.rand(n).astype(np.float32)
+            nutrient_efficiency_arr= np.random.rand(n).astype(np.float32)
+            fertility_rate_arr     = np.random.rand(n).astype(np.float32)
+            offspring_count_arr    = np.random.randint(1, 5, size=n).astype(np.int32)
+            speed_arr              = np.random.uniform(0.1, 5.0, size=n).astype(np.float32)
+            energy_arr             = np.random.uniform(10, 20, size=n).astype(np.float32)
         else:
-            species_arr = np.full((n,), "ORG", dtype=str15)
-            size_arr = np.full((n,), 1.0, dtype=np.float32)
-            camouflage_arr = np.zeros((n,), dtype=np.float32)
-            defense_arr = np.zeros((n,), dtype=np.float32)
-            attack_arr = np.zeros((n,), dtype=np.float32)
-            #
-            # or based on env scale
-            vision_arr = np.full((n,), 15, dtype=np.float32)
-            metabolism_rate_arr = np.full((n,), 1.0, dtype=np.float32)
-            nutrient_efficiency_arr = np.full((n,), 1.0, dtype=np.float32)
-            diet_type_arr = np.full((n,), "heterotroph", dtype=str15)
+            size_arr               = np.full(n, 1.0, dtype=np.float32)
+            camouflage_arr         = np.zeros(n, dtype=np.float32)
+            defense_arr            = np.zeros(n, dtype=np.float32)
+            attack_arr             = np.zeros(n, dtype=np.float32)
+            vision_arr             = np.full(n, 15.0, dtype=np.float32)
+            metabolism_rate_arr    = np.full(n, 1.0, dtype=np.float32)
+            nutrient_efficiency_arr= np.full(n, 1.0, dtype=np.float32)
+            fertility_rate_arr     = np.full(n, 0.1, dtype=np.float32)
+            offspring_count_arr    = np.full(n, 1, dtype=np.int32)
+            speed_arr              = np.full(n, 1.0, dtype=np.float32)
+            energy_arr             = np.full(n, 20.0, dtype=np.float32)
 
-            fertility_rate_arr = np.full((n,), 0.1, dtype=np.float32)
-            offspring_count_arr = np.full((n,), 1, dtype=np.int32)
-            reproduction_type_arr = np.full((n,), "asexual", dtype=str15)
+        # ─── boolean traits ───
+        if randomize:
+            pack_arr    = np.random.choice([False, True], size=n)
+            symbiotic_arr = np.random.choice([False, True], size=n)
+            swim_arr    = np.random.choice([False, True], size=n)
+            walk_arr    = np.random.choice([False, True], size=n)
+            fly_arr     = np.random.choice([False, True], size=n)
+        else:
+            pack_arr      = np.zeros(n, dtype=bool)
+            symbiotic_arr = np.zeros(n, dtype=bool)
+            swim_arr      = np.zeros(n, dtype=bool)
+            walk_arr      = np.ones(n,  dtype=bool)  # default walkers
+            fly_arr       = np.zeros(n, dtype=bool)
 
-            pack_behavior_arr = np.full((n,), False, dtype=np.bool_)
-            symbiotic_arr = np.full((n,), False, dtype=np.bool_)
+        # Sample positions (int coords)
+        x_rand = np.random.randint(0, w, size=n)
+        y_rand = np.random.randint(0, h, size=n)
+        pos    = np.column_stack((x_rand, y_rand))  # shape (n,2)
 
-            swim_arr = np.full((n,), False, dtype=np.bool_)
-            walk_arr = np.full((n,), True,  dtype=np.bool_)
-            fly_arr = np.full((n,), False, dtype=np.bool_)
-            speed_arr = np.full((n,), 1.0,  dtype=np.float32)
+        # Terrain values at each candidate
+        terr_vals = terrain[pos[:,1], pos[:,0]]  # note: [y, x]
 
-            energy_arr = np.full((n,), 20, dtype=np.float32)
-
-        # --- pick random positions and filter to valid land cells ---
-        positions = (
-            np.random.randint(0, grid_size, size=(n, 2))
-            .astype(np.float32)
+        # Build a single Boolean mask of “truly valid” spawns:
+        #    flyers always OK, swimmers only where terr<0, walkers only where terr>=0
+        valid = (
+            fly_arr |
+            ((swim_arr) & (terr_vals < 0)) |
+            ((walk_arr) & (terr_vals >= 0))
         )
-        # bounds check
-        mask = (
-            (positions[:, 0] >= 0) & (positions[:, 0] < env_width) &
-            (positions[:, 1] >= 0) & (positions[:, 1] < env_length)
-        )
-        positions = positions[mask]
 
-        # land check
-        ix = positions[:, 0].astype(np.int32)
-        iy = positions[:, 1].astype(np.int32)
-        terrain_values = env_terrain[iy, ix]
+        # Extract only the valid subset
+        idx           = np.nonzero(valid)[0]
+        valid_count   = idx.shape[0]
+        if valid_count == 0:
+            return 0
 
-        swim_only = swim_arr & ~walk_arr & ~fly_arr
-        walk_only = walk_arr & ~swim_arr & ~fly_arr
-        # Flyers can be anywhere
-        valid_fly_positions = positions[fly_arr]
-        valid_swim_positions = positions[swim_only & (
-            terrain_values < 0)]  # Swimmers need water
-        valid_walk_positions = positions[walk_only & (
-            terrain_values >= 0)]  # Walkers need land
-        positions = np.concatenate(
-            (valid_fly_positions, valid_swim_positions, valid_walk_positions), axis=0)
+        # Positions to float for storing
+        x_new = pos[idx, 0].astype(np.float32)
+        y_new = pos[idx, 1].astype(np.float32)
 
-        valid_count = positions.shape[0]
+        # Truncate & align all trait arrays
+        species_v            = species_arr[idx]
+        size_v               = size_arr[idx]
+        camouflage_v         = camouflage_arr[idx]
+        defense_v            = defense_arr[idx]
+        attack_v             = attack_arr[idx]
+        vision_v             = vision_arr[idx]
+        metabolism_rate_v    = metabolism_rate_arr[idx]
+        nutrient_efficiency_v= nutrient_efficiency_arr[idx]
+        diet_v               = diet_arr[idx]
+        fertility_rate_v     = fertility_rate_arr[idx]
+        offspring_count_v    = offspring_count_arr[idx]
+        repro_v              = repro_arr[idx]
+        pack_v               = pack_arr[idx]
+        symbiotic_v          = symbiotic_arr[idx]
+        swim_v               = swim_arr[idx]
+        walk_v               = walk_arr[idx]
+        fly_v                = fly_arr[idx]
+        speed_v              = speed_arr[idx]
+        energy_v             = energy_arr[idx]
 
-        # --- truncate all arrays to the number of valid spots ---
-        # --- pack into structured array ---
-        spawned = np.zeros((valid_count,), dtype=self._organism_dtype)
-        spawned['species'] = species_arr[:valid_count]
-        spawned['size'] = size_arr[:valid_count]
-        spawned['camouflage'] = camouflage_arr[:valid_count]
-        spawned['defense'] = defense_arr[:valid_count]
-        spawned['attack'] = attack_arr[:valid_count]
-        spawned['vision'] = vision_arr[:valid_count]
-        spawned['metabolism_rate'] = metabolism_rate_arr[:valid_count]
-        spawned['nutrient_efficiency'] = nutrient_efficiency_arr[:valid_count]
-        spawned['diet_type'] = diet_type_arr[:valid_count]
-        spawned['fertility_rate'] = fertility_rate_arr[:valid_count]
-        spawned['offspring_count'] = offspring_count_arr[:valid_count]
-        spawned['reproduction_type'] = reproduction_type_arr[:valid_count]
-        spawned['pack_behavior'] = pack_behavior_arr[:valid_count]
-        spawned['symbiotic'] = symbiotic_arr[:valid_count]
-        spawned['swim'] = swim_arr[:valid_count]
-        spawned['walk'] = walk_arr[:valid_count]
-        spawned['fly'] = fly_arr[:valid_count]
-        spawned['speed'] = speed_arr[:valid_count]
-        spawned['energy'] = energy_arr[:valid_count]
-        spawned['x_pos'] = positions[:, 0]
-        spawned['y_pos'] = positions[:, 1]
+        # Append to your per-field arrays
+        self.species            = np.concatenate((self.species,            species_v))
+        self.diet_type          = np.concatenate((self.diet_type,          diet_v))
+        self.reproduction_type  = np.concatenate((self.reproduction_type,  repro_v))
 
-        # --- append to full array and update births ---
-        self._organisms = np.concatenate((self._organisms, spawned))
+        self.size               = np.concatenate((self.size,               size_v))
+        self.camouflage         = np.concatenate((self.camouflage,         camouflage_v))
+        self.defense            = np.concatenate((self.defense,            defense_v))
+        self.attack             = np.concatenate((self.attack,             attack_v))
+        self.vision             = np.concatenate((self.vision,             vision_v))
+        self.metabolism_rate    = np.concatenate((self.metabolism_rate,    metabolism_rate_v))
+        self.nutrient_efficiency= np.concatenate((self.nutrient_efficiency,nutrient_efficiency_v))
+        self.fertility_rate     = np.concatenate((self.fertility_rate,     fertility_rate_v))
+        self.offspring_count    = np.concatenate((self.offspring_count,    offspring_count_v))
+        self.speed              = np.concatenate((self.speed,              speed_v))
+
+        self.pack_behavior      = np.concatenate((self.pack_behavior,      pack_v))
+        self.symbiotic          = np.concatenate((self.symbiotic,          symbiotic_v))
+        self.swim               = np.concatenate((self.swim,               swim_v))
+        self.walk               = np.concatenate((self.walk,               walk_v))
+        self.fly                = np.concatenate((self.fly,                fly_v))
+
+        self.energy             = np.concatenate((self.energy,             energy_v))
+        self.x_pos              = np.concatenate((self.x_pos,              x_new))
+        self.y_pos              = np.concatenate((self.y_pos,              y_new))
+
+        # Update the birth counter and return
         self._env.add_births(valid_count)
-
         return valid_count
-    # TODO: Implement mutation and
-    #       eventually different sexual reproduction types
-
-    def reproduce(self, arg1, arg2):
-        pass
-
+    
     def move(self):
-        orgs = self._organisms
-        N = orgs.shape[0]
+        N = self.x_pos.size
         if N == 0:
             return
 
-        terrain = self._env.get_terrain()
-        width, length = self._env.get_width(), self._env.get_length()
-        ix = self._organisms['x_pos'].astype(np.int32)
-        iy = self._organisms['y_pos'].astype(np.int32)
-        land_mask = terrain[iy, ix] >= 0
-
-        # Penalize energy for out-of-terrain conditions
-        orgs = self._organisms
-        swim_only = orgs['swim'] & ~orgs['walk'] & ~orgs['fly']
-        walk_only = orgs['walk'] & ~orgs['swim'] & ~orgs['fly']
-
-        # swim-only on land, or walk-only in water
-        penalty = (swim_only & land_mask) | \
-            (walk_only & ~land_mask)
-
-        # subtract 5 energy per violation (they die via remove_dead when energy ≤ 0)
-        orgs['energy'][penalty] -= 5
-
-        coords = np.stack((orgs['x_pos'], orgs['y_pos']), axis=1)
-        vision_radii = orgs['vision']
-        neigh_lists = self._pos_tree.query_ball_point(coords, vision_radii)
-
-
-        # precompute once per tick, outside the per‐organism loop:
-        # Wipes buffer for movement
-        dirs = self._dirs
-
-        # coords: (N,2) array of current positions
-        samples = coords[:, None, :] + dirs[None, :, :]  # shape (N,4,2)
-
-        # floor to grid‐indices
-        ix = samples[..., 0].astype(int)  # (N,4)
-        iy = samples[..., 1].astype(int)  # (N,4)
-
-        # mask out‐of‐bounds
-        valid = (
-            (ix >= 0) & (ix < width) &
-            (iy >= 0) & (iy < length)
-        )  # (N,4)
-
-        # lookup terrain values, fill invalid with a safe default
-        tiles = np.full((N, 4), np.nan, dtype=np.float32)
-        tiles[valid] = terrain[iy[valid], ix[valid]]
-
-        # for water-avoidance:
-        mask_water = tiles < 0     # (N,4)
-        avoid_water = - (dirs[None, :, :] * mask_water[..., None]).sum(axis=1)
-        # for land-avoidance:
-        mask_land = tiles >= 0     # (N,4)
-        avoid_land = - (dirs[None, :, :] * mask_land[..., None]).sum(axis=1)
-
-        # —––––––– grab items once, outside of any per-organism loop –––––––—
-        vision = orgs['vision']
-        attack = orgs['attack']
-        defense = orgs['defense']
-        pack_flag = orgs['pack_behavior']
-        species = orgs['species']
-        fly_flag = orgs['fly']
-        swim_flag = orgs['swim']
-        walk_flag = orgs['walk']
-        speed = orgs['speed']
-
-        def _compute(i, pos, neighs):
-            # pull out “my” values once
-            my = orgs[i]
-            my_cam = my['camouflage']
-            my_att = my['attack']
-            my_def = my['defense']
-            my_spc = my['species']
-            my_pack = pack_flag[i]
-            my_fly = fly_flag[i]
-            my_swim = swim_flag[i]
-            my_walk = walk_flag[i]
-            my_speed = speed[i]
-
-            # make neighbors a NumPy array of ints
-            neighs = np.asarray(neighs, dtype=int)
-
-            # 1) camouflage filter
-            mask_valid = (neighs != i) & (vision[neighs] >= my_cam)
-            valid = neighs[mask_valid]
-
-            # 2) pack_mates if pack_behavior array isn’t empty
-            if pack_flag.shape[0] > 0:
-                pack_mates = valid[pack_flag[valid]]
-
-            # allocate movement accumulator
-            move_vec = np.zeros(2, dtype=np.float32)
-
-            # — behavioral overrides (pack) —
-            if my_pack:
-                steer = np.zeros(2, dtype=np.float32)
-                SEPARATION_WEIGHT = 10
-                SEPARATION_RADIUS = 5
-
-                # 1) compute net strengths against each neighbor in `valid`
-                non_pack_mask = ~pack_flag[valid]       # True for neighbors that are NOT pack mates
-
-                my_net    = my_att - defense[valid]     # our attack minus their defense
-                their_net = attack[valid] - my_def      # their attack minus our defense
-
-                # now require non-pack AND the appropriate net comparison
-                host_mask = non_pack_mask & (their_net > my_net)     # if their net > our net → hostile
-                prey_mask = non_pack_mask & (my_net    > their_net)  # if our net > their net → prey
-      
-
-                hostiles = valid[host_mask]
-                if hostiles.size > 0:
-                    center = coords[hostiles].mean(axis=0)
-                    steer += (pos - center)
-                else:
-                    prey = valid[prey_mask]
-                    if prey.size > 0:
-                        center = coords[prey].mean(axis=0)
-                        steer += (center - pos)
-                    else:
-                        # c) cohesion + gentle separation
-                        if pack_mates.size > 0:
-                            center = coords[pack_mates].mean(axis=0)
-                            steer += (center - pos)
-
-                            dists = coords[pack_mates] - pos
-                            norms = np.linalg.norm(dists, axis=1)
-                            close = norms < SEPARATION_RADIUS
-                            if close.any():
-                                repulse = -np.mean(dists[close], axis=0)
-                                steer += repulse * SEPARATION_WEIGHT
-
-                # terrain avoidance
-                WATER_PUSH = 5.0
-                LAND_PUSH = 5.0
-                if not my_swim:
-                    steer += WATER_PUSH * avoid_water[i]
-                if not my_walk:
-                    steer += LAND_PUSH * avoid_land[i]
-
-                # normalize & scale by speed
-                norm = np.linalg.norm(steer)
-                step = (steer / norm) * \
-                    my_speed if norm > 0 else np.zeros(2, np.float32)
-
-                new = pos + step
-                new[0] = np.clip(new[0], 0, width - 1)
-                new[1] = np.clip(new[1], 0, length - 1)
-                return new
-
-            # — social steering (non-pack) —
-            if my_fly:
-                pool = valid[fly_flag[valid]]
-            else:
-                pool = valid
-
-            # assume `pool` is already valid subset
-            my_net_pool    = my_att - defense[pool]
-            their_net_pool = attack[pool] - my_def
-
-            host_mask = their_net_pool > my_net_pool
-            prey_mask = my_net_pool    > their_net_pool
-
-            hostiles = pool[host_mask]
-            prey     = pool[prey_mask]
-
-            if hostiles.size > 0:
-                move_vec += (pos - coords[hostiles]).mean(axis=0)
-            if prey.size > 0:
-                move_vec += (coords[prey] - pos).mean(axis=0)
-
-            # crowd repulsion
-            CROWD_PUSH = 0.5 * my_speed
-            same_mask = species[valid] == my_spc
-            same = valid[same_mask]
-            if same.size > 0:
-                repulse = np.mean(pos - coords[same], axis=0)
-                move_vec += CROWD_PUSH * repulse
-
-            # terrain avoidance
-            WATER_PUSH = 5.0
-            LAND_PUSH = 5.0
-            if not my_swim:
-                move_vec += WATER_PUSH * avoid_water[i]
-            if not my_walk:
-                move_vec += LAND_PUSH * avoid_land[i]
-
-            # normalize & scale
-            norm = np.linalg.norm(move_vec)
-            step = (move_vec / norm) * \
-                my_speed if norm > 0 else np.zeros(2, np.float32)
-
-            new = pos + step
-            new[0] = np.clip(new[0], 0, width - 1)
-            new[1] = np.clip(new[1], 0, length - 1)
-            return new
-
-        # map across all organisms
-        new_pos = np.array([
-            _compute(i, coords[i], neigh_lists[i])
-            for i in range(N)
-        ], dtype=np.float32)
-
-        orgs['x_pos'], orgs['y_pos'] = new_pos[:, 0], new_pos[:, 1]
+        # 1) Build spatial index and query neighbors
         self.build_spatial_index()
-        
+        coords = np.stack((self.x_pos, self.y_pos), axis=1)
+        raw_lists = self._pos_tree.query_ball_point(coords, self.vision)
+
+        # 2) Flatten neighbor lists
+        counts = [len(lst) for lst in raw_lists]
+        total = sum(counts)
+        neigh_ptrs = np.empty(N+1, dtype=np.int32)
+        neigh_ptrs[0] = 0
+        np.cumsum(counts, out=neigh_ptrs[1:])
+        neigh_inds = np.empty(total, dtype=np.int32)
+        idx = 0
+        for i_idx, lst in enumerate(raw_lists):
+            neigh_inds[idx:idx+counts[i_idx]] = lst
+            idx += counts[i_idx]
+
+        dir_count = self._dirs.shape[0]
+        # 3) Transfer data to GPU
+        d_x           = cuda.to_device(self.x_pos)
+        d_y           = cuda.to_device(self.y_pos)
+        d_e           = cuda.to_device(self.energy)
+        d_cam         = cuda.to_device(self.camouflage)
+        d_vis         = cuda.to_device(self.vision)
+        d_att         = cuda.to_device(self.attack)
+        d_def         = cuda.to_device(self.defense)
+        d_pack        = cuda.to_device(self.pack_behavior)
+        d_swim        = cuda.to_device(self.swim)
+        d_walk        = cuda.to_device(self.walk)
+        d_fly         = cuda.to_device(self.fly)
+        d_speed       = cuda.to_device(self.speed)
+        d_spc         = cuda.to_device(self.species)
+        d_terrain     = cuda.to_device(self._env.get_terrain())
+        terrain_h, terrain_w = self._env.get_length(), self._env.get_width()
+        d_dirs        = cuda.to_device(self._dirs)
+        d_dirs_count  = cuda.to_device(dir_count)
+        d_ptrs        = cuda.to_device(neigh_ptrs)
+        d_inds        = cuda.to_device(neigh_inds)
+
+        # Allocate output arrays
+        d_new_x = cuda.device_array_like(d_x)
+        d_new_y = cuda.device_array_like(d_y)
+        d_new_e = cuda.device_array_like(d_e)
+
+        # 4) Launch kernel
+        threads_per_block = 128
+        blocks_per_grid  = (N + threads_per_block - 1) // threads_per_block
+        _move_kernel[blocks_per_grid, threads_per_block](
+            d_x, d_y, d_e,
+            d_cam, d_vis, d_att, d_def,
+            d_pack, d_swim, d_walk, d_fly, d_speed,
+            d_spc,
+            d_terrain, terrain_w, terrain_h,
+            d_dirs, d_dirs_count, d_ptrs, d_inds,
+            d_new_x, d_new_y, d_new_e
+        )
+        cuda.synchronize()
+
+        # 5) Copy back
+        self.x_pos[:]   = d_new_x.copy_to_host()
+        self.y_pos[:]   = d_new_y.copy_to_host()
+        self.energy[:]  = d_new_e.copy_to_host()
 
     def resolve_attacks(self):
         """
         Vectorized one‐to‐one attacks on nearest neighbor within vision.
         Attackers gain energy equal to the damage they inflict.
         """
-        orgs = self._organisms
         N = orgs.shape[0]
         if N < 2:
             return
 
         # --- 0) Extract flat arrays once ---
-        coords = np.stack((orgs['x_pos'], orgs['y_pos']), axis=1)  # (N,2)
-        att    = orgs['attack']      # (N,)
-        deff   = orgs['defense']
+        coords = np.stack((self.x_pos, self.y_pos), axis=1)  # (N,2)
+        att = orgs['attack']      # (N,)
+        deff = orgs['defense']
         vision = orgs['vision']
-        pack   = orgs['pack_behavior']
-        fly    = orgs['fly']
-        swim   = orgs['swim']
-        walk   = orgs['walk']
+        pack = orgs['pack_behavior']
+        fly = orgs['fly']
+        swim = orgs['swim']
+        walk = orgs['walk']
         energy = orgs['energy']
         terrain = self._env.get_terrain()
 
@@ -486,12 +333,12 @@ class Organisms:
             self.build_spatial_index()
 
         # --- 2) Batch nearest-neighbor query (k=2) ---
-        dists, idxs   = self._pos_tree.query(coords, k=2, workers=-1)
-        nearest       = idxs[:,1]          # (N,)
-        nearest_dist  = dists[:,1]
+        dists, idxs = self._pos_tree.query(coords, k=2, workers=-1)
+        nearest = idxs[:, 1]          # (N,)
+        nearest_dist = dists[:, 1]
 
         # --- 3) Filter to those within vision ---
-        can_see   = nearest_dist <= vision
+        can_see = nearest_dist <= vision
         attackers = np.nonzero(can_see)[0]
         if attackers.size == 0:
             return
@@ -507,8 +354,8 @@ class Organisms:
         invalid = np.zeros_like(i, dtype=bool)
         invalid |= (~fly[i] & fly[j])
         invalid |= (~swim[i] & swim[j] & (tiles < 0))
-        invalid |= ( swim[i] & ~walk[i] & (tiles >= 0))
-        invalid |= ( swim[i] & ~fly[i]  & fly[j] & (tiles < 0))
+        invalid |= (swim[i] & ~walk[i] & (tiles >= 0))
+        invalid |= (swim[i] & ~fly[i] & fly[j] & (tiles < 0))
 
         valid_mask = ~invalid
         i = i[valid_mask]
@@ -517,28 +364,28 @@ class Organisms:
             return
 
         # --- 5) Compute net attack values ---
-        my_net    = att[i] - deff[j]    # (K,)
+        my_net = att[i] - deff[j]    # (K,)
         their_net = att[j] - deff[i]
 
         # --- 6) Classify host vs prey ---
         if use_pack:
             non_pack = pack[i] & ~pack[j]
             host = (their_net > my_net) & non_pack
-            prey = (my_net    > their_net) & non_pack
+            prey = (my_net > their_net) & non_pack
         else:
-            host =  their_net > my_net
-            prey =  my_net    > their_net
+            host = their_net > my_net
+            prey = my_net > their_net
 
         # only positive damage engagements
         host &= (their_net > 0)
-        prey &= (my_net     > 0)
+        prey &= (my_net > 0)
 
         # --- 7) Apply damage and energy gain in batch ---
         # Hostiles: neighbor j attacked i
         if np.any(host):
             idx_i = i[host]           # defenders hit
             idx_j = j[host]           # attackers
-            dmg   = their_net[host]
+            dmg = their_net[host]
             energy[idx_i] -= dmg      # defender loses
             energy[idx_j] += dmg      # attacker gains
 
@@ -546,10 +393,9 @@ class Organisms:
         if np.any(prey):
             idx_i = i[prey]           # attackers
             idx_j = j[prey]           # defenders hit
-            dmg   = my_net[prey]
+            dmg = my_net[prey]
             energy[idx_j] -= dmg      # defender loses
             energy[idx_i] += dmg      # attacker gains
-
 
     def remove_dead(self):
         """
