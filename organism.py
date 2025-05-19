@@ -15,7 +15,7 @@ LAND_PUSH = 5.0
 ECO_ENERGY_CONST = 100
 
 #Reproduction constant
-REPRODUCTION_PROXIMITY_CONST = 15
+REPRODUCTION_PROXIMITY_CONST = 7.5
 
 class Organisms:
     """
